@@ -2,7 +2,7 @@
 
 A Claude Code **skill** that imports *external* academic material — a paper, PDF,
 slide deck (PDF/PPTX), DOI, arXiv id, a URL to any of those, or pasted text — into a
-[palace](https://github.com/6yq/palace) knowledge graph as linked markdown **dots**,
+[Mneme](https://github.com/6yq/Mneme) knowledge graph as linked markdown **dots**,
 clearly marked as *imported* (their own `Lit:<Topic>` lane + a `source:` field) so
 outside knowledge stays visually distinct from your own work.
 

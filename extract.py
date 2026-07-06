@@ -16,7 +16,7 @@ Usage:
 
 Writes  <out>/<slug>/text.md  and  <out>/<slug>/meta.json,  prints the dir, a
 sections outline, and char count so the reader can target sections, not the whole file.
-Default out = $PALACE/sources or ./sources.
+Default out = $MNEME/sources or ./sources.
 """
 import sys, os, re, json, subprocess, tempfile, zipfile
 import urllib.request, urllib.parse, urllib.error
@@ -79,7 +79,7 @@ def strip_jats(s):
 def from_doi(doi):
     doi = re.sub(r"^\s*(doi:|https?://(dx\.)?doi\.org/)", "", doi.strip(), flags=re.I)
     url = "https://api.crossref.org/works/" + urllib.parse.quote(doi)
-    req = urllib.request.Request(url, headers={"User-Agent": "palace-ingest/1 (mailto:local)"})
+    req = urllib.request.Request(url, headers={"User-Agent": "Mneme-ingest/1 (mailto:local)"})
     with urllib.request.urlopen(req, timeout=30) as r:
         msg = json.load(r)["message"]
     title = " ".join(msg.get("title") or []) or doi
@@ -98,7 +98,7 @@ def from_doi(doi):
                              "year": year, "source": "doi:" + doi}
 
 def fetch(url):
-    req = urllib.request.Request(url, headers={"User-Agent": "palace-ingest/1"})
+    req = urllib.request.Request(url, headers={"User-Agent": "Mneme-ingest/1"})
     with urllib.request.urlopen(req, timeout=45) as r:
         return r.read(), r.headers.get("Content-Type", "")
 
@@ -157,7 +157,7 @@ def main():
     if title: meta["title"] = title
     text = text.replace("\r\n", "\n").strip() + "\n"
 
-    base = out or os.environ.get("PALACE") and (Path(os.environ["PALACE"]) / "sources") or "sources"
+    base = out or os.environ.get("MNEME") and (Path(os.environ["MNEME"]) / "sources") or "sources"
     slug = slug or slugify(meta.get("title") or (arg if not is_text else "pasted-text"))
     d = Path(base) / slug
     d.mkdir(parents=True, exist_ok=True)

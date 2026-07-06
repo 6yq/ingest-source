@@ -1,14 +1,14 @@
 ---
 name: ingest-source
-description: Use when the user wants to import EXTERNAL academic material into the palace knowledge graph — a paper, PDF, slide deck (PDF/PPTX), DOI, arXiv id, a URL to any of those, or pasted text ("ingest this paper", "add this PDF/deck to the palace", "read this DOI into my notes", "import this reference", "distill this paper"). Extracts the text with local CLIs (near-zero model tokens), understands it, and writes linked "dots" marked as imported (scope `Lit:<Topic>`, a `source:` field) so outside knowledge is visually separate from your own work. Sibling of `distill-session`, which stays for your OWN Claude Code sessions; this one is for OTHERS' material.
+description: Use when the user wants to import EXTERNAL academic material into the Mneme knowledge graph — a paper, PDF, slide deck (PDF/PPTX), DOI, arXiv id, a URL to any of those, or pasted text ("ingest this paper", "add this PDF/deck to the Mneme", "read this DOI into my notes", "import this reference", "distill this paper"). Extracts the text with local CLIs (near-zero model tokens), understands it, and writes linked "dots" marked as imported (scope `Lit:<Topic>`, a `source:` field) so outside knowledge is visually separate from your own work. Sibling of `distill-session`, which stays for your OWN Claude Code sessions; this one is for OTHERS' material.
 ---
 
-# Ingest Source — outside material into palace dots
+# Ingest Source — outside material into Mneme dots
 
 ## What this is
 
 `distill-session` captures what *you* did in a session. **This skill captures what
-you *read*** — a paper, deck, DOI, or URL — and files it in the same palace graph, but
+you *read*** — a paper, deck, DOI, or URL — and files it in the same Mneme graph, but
 clearly marked as **imported** so you can always tell your own findings from the
 literature. Same dot schema, same narrative-spine and linking discipline (read the
 `distill-session` SKILL.md for those — do not duplicate them here); the differences are
@@ -22,14 +22,14 @@ The model can't read PDF/pptx bytes. Convert first with the bundled dispatcher, 
 uses `pdftotext` / `pandoc` / `curl` / stdlib (pptx = a zip of XML, parsed directly):
 
 ```bash
-export PALACE=~/.claude/palace   # so output lands in $PALACE/sources (gitignored)
+export MNEME=~/.claude/mneme   # so output lands in $MNEME/sources (gitignored)
 ~/.claude/skills/ingest-source/extract.py <input> [--slug NAME] [--title T]
 ```
 
 `<input>` is a file path (`.pdf .pptx .docx .odt .rtf .epub .html .txt .md`), a **DOI**
 (`10.xxxx/…` → Crossref metadata + abstract + references, no PDF needed), an **arXiv/URL**
 (PDF → `pdftotext`; HTML → pandoc), or `--text "…"` / `--text -` for pasted content.
-It writes `$PALACE/sources/<slug>/text.md` + `meta.json` and prints a **header outline**.
+It writes `$MNEME/sources/<slug>/text.md` + `meta.json` and prints a **header outline**.
 Legacy `.ppt` isn't supported (no libreoffice) — ask for a `.pptx` or `.pdf`.
 
 ### 2. Understand — outline first, sections next, delegate the read
@@ -57,7 +57,7 @@ imported dot that doesn't touch your work is nearly worthless.
 
 ### 4. Write — same schema, marked as imported
 
-Write each dot to `$PALACE/dots/<id>.md` with the `distill-session` schema, plus:
+Write each dot to `$MNEME/dots/<id>.md` with the `distill-session` schema, plus:
 
 - **`project: Lit:<Topic>`** — the `Lit:` scope puts imported material in its own lane/
   colour. Reuse the subject the affiliate matched (`Lit:Methods`, `Lit:Systematics`,
@@ -73,7 +73,7 @@ Write each dot to `$PALACE/dots/<id>.md` with the `distill-session` schema, plus
 
 Then reindex + commit, exactly as `distill-session` step 5.
 
-> If a **palace MCP server** is connected, use its `affiliate` and `upsert` tools
+> If a **Mneme MCP server** is connected, use its `affiliate` and `upsert` tools
 > instead of the script + manual file write: same effect, structured, no shelling out.
 
 ## Dot content, honestly
