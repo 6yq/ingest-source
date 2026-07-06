@@ -60,8 +60,8 @@ imported dot that doesn't touch your work is nearly worthless.
 Write each dot to `$PALACE/dots/<id>.md` with the `distill-session` schema, plus:
 
 - **`project: Lit:<Topic>`** — the `Lit:` scope puts imported material in its own lane/
-  colour. Reuse the subject the affiliate matched (`Lit:Calib`, `Lit:Reco`, `Lit:FSMP`,
-  `Lit:Sim`, `Lit:Systematics`, `Lit:Fitters`, …). Keep subjects consistent, like any lane.
+  colour. Reuse the subject the affiliate matched (`Lit:Methods`, `Lit:Systematics`,
+  `Lit:Theory`, … — mirror your own subjects). Keep subjects consistent, like any lane.
 - **`source:`** — provenance: the DOI / arXiv id / URL / short cite key (`Author2021`).
   This is what flags the dot as imported; the viewer renders `source:` dots **hollow**
   (vs solid = your work) and offers a *mine / imported* filter. Never leave it blank on
@@ -86,7 +86,7 @@ Then reindex + commit, exactly as `distill-session` step 5.
 ## Red flags — you're doing it wrong if
 
 - You read the raw PDF/`text.md` into the main context instead of `extract.py` + a subagent.
-- An imported dot has no `source:` or lives in an experiment lane (`JUNO:*`) instead of `Lit:*`.
+- An imported dot has no `source:` or lives in one of your own work lanes instead of `Lit:*`.
 - The paper's dots are an island — no `related`/`informs` edge into your own work.
 - You invented numbers the extracted text doesn't contain, or dropped the authors' caveats.
 - You used it for your OWN session work — that's `distill-session`.
