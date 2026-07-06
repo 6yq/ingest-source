@@ -73,6 +73,9 @@ Write each dot to `$PALACE/dots/<id>.md` with the `distill-session` schema, plus
 
 Then reindex + commit, exactly as `distill-session` step 5.
 
+> If a **palace MCP server** is connected, use its `affiliate` and `upsert` tools
+> instead of the script + manual file write: same effect, structured, no shelling out.
+
 ## Dot content, honestly
 
 - Capture the paper's **claim + evidence**, in its authors' voice, not yours. A `result`
