@@ -32,6 +32,12 @@ export MNEME=~/.claude/mneme   # so output lands in $MNEME/sources (gitignored)
 It writes `$MNEME/sources/<slug>/text.md` + `meta.json` and prints a **header outline**.
 Legacy `.ppt` isn't supported (no libreoffice) — ask for a `.pptx` or `.pdf`.
 
+It also **keeps the original source file** inside that gitignored `sources/<slug>/` folder —
+moving it there if it was dropped in the repo (e.g. the root), copying it if it lives
+elsewhere (so the user's own file stays put). Source binaries (PDF/pptx/…) belong **only**
+under `sources/`: never leave one loose in the tracked tree or commit it — `sources/` and the
+binary extensions are gitignored, and the `.md`/`.json` extract is the working copy.
+
 ### 2. Understand — outline first, sections next, delegate the read
 
 Minimise tokens: **do not read the whole `text.md` into the main context.** Delegate to

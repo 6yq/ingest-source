@@ -163,6 +163,23 @@ def main():
     d.mkdir(parents=True, exist_ok=True)
     (d / "text.md").write_text(text, encoding="utf-8")
     meta.update({"chars": len(text), "slug": slug})
+
+    # Keep the original source file WITH its extract, inside the gitignored sources/ tree —
+    # never leave a PDF/pptx loose in the repo where it could get committed. If the file is
+    # already inside $MNEME (e.g. dropped in the repo root), MOVE it out of the tracked tree;
+    # if it lives elsewhere (~/papers/…), COPY it so the user's original stays put.
+    if not is_text and arg and Path(arg).is_file():
+        import shutil
+        srcf = Path(arg).resolve(); dst = (d / srcf.name).resolve()
+        mneme_root = Path(base).resolve().parent
+        if srcf != dst:
+            inside = str(srcf).startswith(str(mneme_root) + os.sep)
+            try:
+                (shutil.move if inside else shutil.copy2)(str(srcf), str(dst))
+                meta["kept_source"] = dst.name
+            except OSError:
+                pass
+
     (d / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8")
 
     # outline = markdown headers, so the reader targets sections not the whole file
