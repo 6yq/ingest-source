@@ -27,10 +27,19 @@ export MNEME=~/.claude/mneme   # so output lands in $MNEME/sources (gitignored)
 ```
 
 `<input>` is a file path (`.pdf .pptx .docx .odt .rtf .epub .html .txt .md`), a **DOI**
-(`10.xxxx/…` → Crossref metadata + abstract + references, no PDF needed), an **arXiv/URL**
-(PDF → `pdftotext`; HTML → pandoc), or `--text "…"` / `--text -` for pasted content.
-It writes `$MNEME/sources/<slug>/text.md` + `meta.json` and prints a **header outline**.
-Legacy `.ppt` isn't supported (no libreoffice) — ask for a `.pptx` or `.pdf`.
+(`10.xxxx/…` → Crossref metadata + abstract + references, no PDF needed), an **arXiv id/URL**
+(`2409.18839` / `arxiv.org/abs/…` → fetches the **LaTeX e-print source** so equations are
+exact and no OCR is needed, with title/authors/date from the arXiv API; falls back to the
+PDF if the source is withdrawn), a plain **URL** (PDF → `pdftotext`; HTML → pandoc), or
+`--text "…"` / `--text -` for pasted content. It writes `$MNEME/sources/<slug>/text.md` +
+`meta.json` and prints a **header outline**. Legacy `.ppt` isn't supported — ask for `.pptx`/`.pdf`.
+
+**Hard PDFs (result tables, formulas, scanned scans):** the default `pdftotext` flattens
+tables and drops math. Add `--rich` (or `--pdf-engine mineru`) to route the PDF through
+**MinerU** — tables → HTML, formulas → LaTeX, OCR for scanned pages, multi-column reading
+order — still ~zero model tokens (it emits markdown the reader then reads). `auto` (default)
+also auto-escalates to MinerU when a PDF has no text layer. MinerU is optional: `pip install
+mineru`; absent, text-layer PDFs still work and a scanned PDF errors with that hint.
 
 It also **keeps the original source file** inside that gitignored `sources/<slug>/` folder —
 moving it there if it was dropped in the repo (e.g. the root), copying it if it lives
@@ -53,17 +62,22 @@ Extract salient keywords while reading (see the keyword guidance in `distill-ses
 then find where the dot belongs and what it should link to:
 
 ```bash
-~/.claude/skills/distill-session/affiliate.py --keywords "k1, k2, k3" --title "…"
+~/.claude/skills/distill-session/affiliate.py --keywords "k1, k2, k3" --title "…" \
+    --textfile $MNEME/sources/<slug>/text.md
 ```
 
-It ranks existing project lanes by keyword overlap and lists candidate `related` dot ids.
+Pass `--textfile` (the extracted source) so the TF-IDF semantic signal surfaces your own
+dots the paper speaks to even when they share no literal keyword. It ranks existing project
+lanes and lists candidate `related` dot ids (tagged `[kw|sem|kw+sem]`).
 Use it to (a) choose the **topic** subject and (b) wire `related`/`informs`/`supports`/
 `refutes` edges to your own dots the paper speaks to. This is the whole point — an
 imported dot that doesn't touch your work is nearly worthless.
 
 ### 4. Write — same schema, marked as imported
 
-Write each dot to `$MNEME/dots/<id>.md` with the `distill-session` schema, plus:
+Write each dot to `$MNEME/dots/<Scope>/<Subject>/<id>.md` — the lane folder derived from
+`project:` (`Lit:Calib` → `dots/Lit/Calib/`); `--restructure` re-files anything misplaced.
+Use the `distill-session` schema, plus:
 
 - **`project: Lit:<Topic>`** — the `Lit:` scope puts imported material in its own lane/
   colour. Reuse the subject the affiliate matched (`Lit:Methods`, `Lit:Systematics`,

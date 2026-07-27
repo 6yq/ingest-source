@@ -8,17 +8,22 @@ or raw text.
 
 Usage:
   extract.py <path>                     # local file, kind by extension
+  extract.py 2409.18839                 # arXiv id/URL -> LaTeX e-print source (math exact)
   extract.py 10.1088/1748-0221/…        # DOI  -> Crossref metadata + abstract + refs
   extract.py https://…/paper.pdf        # URL  -> download + pdftotext
   extract.py https://…/page.html        # URL  -> pandoc html->markdown
   extract.py --text "…"  |  --text -    # raw text (─ = stdin)
-  [--out DIR] [--title T] [--slug S]
+  [--out DIR] [--title T] [--slug S] [--rich] [--pdf-engine pdftotext|mineru|auto]
+
+PDF engine: 'auto' (default) uses pdftotext, escalating to MinerU (tables->HTML,
+formulas->LaTeX, OCR) only for scanned/no-text-layer PDFs; --rich forces MinerU.
+MinerU is optional — absent, --pdf-engine=auto still handles text-layer PDFs.
 
 Writes  <out>/<slug>/text.md  and  <out>/<slug>/meta.json,  prints the dir, a
 sections outline, and char count so the reader can target sections, not the whole file.
 Default out = $MNEME/sources or ./sources.
 """
-import sys, os, re, json, subprocess, tempfile, zipfile
+import sys, os, re, json, subprocess, tempfile, zipfile, io, gzip, tarfile
 import urllib.request, urllib.parse, urllib.error
 from pathlib import Path
 from xml.etree import ElementTree as ET
@@ -37,13 +42,45 @@ def slugify(s, n=60):
     return (s[:n].strip("-")) or "source"
 
 # ── extractors (each returns markdown text) ─────────────────────────────────
-def from_pdf(path):
+def mineru_pdf(path):
+    """High-fidelity PDF -> Markdown via MinerU: tables -> HTML, formulas -> LaTeX, OCR for
+    scanned pages, multi-column reading-order reassembly. Optional heavy CLI (still ~zero
+    model tokens: it emits markdown the reader then reads). Raises if not installed."""
+    tool = "mineru" if have("mineru") else ("magic-pdf" if have("magic-pdf") else None)
+    if not tool:
+        raise RuntimeError("mineru not installed")
+    with tempfile.TemporaryDirectory() as td:
+        cmd = [tool, "-p", str(path), "-o", td]
+        if tool == "magic-pdf": cmd += ["-m", "auto"]        # legacy magic-pdf needs a mode
+        r = sh(cmd)
+        if r.returncode != 0:
+            raise RuntimeError(f"{tool} failed: " + (r.stderr or r.stdout)[:300])
+        mds = sorted(Path(td).rglob("*.md"), key=lambda p: p.stat().st_size, reverse=True)
+        if not mds:
+            raise RuntimeError(f"{tool} produced no markdown under {td}")
+        return mds[0].read_text(encoding="utf-8", errors="replace")
+
+def from_pdf(path, engine="auto", rich=False):
+    """engine: 'pdftotext' (fast, uses the text layer), 'mineru' (rich: tables/formulas/OCR),
+    or 'auto' = pdftotext, escalating to mineru ONLY when the PDF has no text layer (scanned)
+    or --rich is asked. Degrades gracefully when mineru is absent."""
+    if rich and engine == "auto":
+        engine = "mineru"
+    if engine == "mineru":
+        return mineru_pdf(path)
     r = sh(["pdftotext", "-layout", str(path), "-"])
     if r.returncode != 0 or not r.stdout.strip():
         r = sh(["pdftotext", str(path), "-"])            # fallback: no -layout
-    if r.returncode != 0:
-        raise RuntimeError("pdftotext failed: " + r.stderr[:200])
-    return r.stdout
+    txt = r.stdout if r.returncode == 0 else ""
+    if txt.strip():
+        return txt
+    # empty text layer => scanned/image PDF. Escalate to OCR when MinerU is available.
+    if engine == "auto" and (have("mineru") or have("magic-pdf")):
+        return mineru_pdf(path)
+    raise RuntimeError(
+        "pdftotext got no text (scanned/image PDF?). Install MinerU for OCR "
+        "(`pip install mineru`) then re-run, or pass a text-layer PDF."
+        + (("  pdftotext: " + r.stderr[:150]) if r.returncode != 0 else ""))
 
 def from_pptx(path):
     """No libreoffice/python-pptx needed: a .pptx is a zip; pull <a:t> runs per slide."""
@@ -102,29 +139,113 @@ def fetch(url):
     with urllib.request.urlopen(req, timeout=45) as r:
         return r.read(), r.headers.get("Content-Type", "")
 
-def from_url(url):
+def from_url(url, engine="auto", rich=False):
     data, ctype = fetch(url)
     is_pdf = url.lower().split("?")[0].endswith(".pdf") or "application/pdf" in ctype
     with tempfile.NamedTemporaryFile(suffix=".pdf" if is_pdf else ".html", delete=False) as tf:
         tf.write(data); tmp = tf.name
     try:
-        return (from_pdf(tmp) if is_pdf else from_pandoc(tmp, fmt="html")), \
+        return (from_pdf(tmp, engine=engine, rich=rich) if is_pdf else from_pandoc(tmp, fmt="html")), \
                {"source": url, "title": ""}
     finally:
         try: os.unlink(tmp)
         except OSError: pass
 
-def dispatch(arg, is_text, raw_text):
+# ── arXiv: prefer the LaTeX e-print source (equations exact, no OCR) ─────────
+ARXIV_NEW = r"\d{4}\.\d{4,5}(?:v\d+)?"
+ARXIV_OLD = r"[a-z][a-z.-]+/\d{7}(?:v\d+)?"
+
+def arxiv_id(s):
+    s = s.strip()
+    m = re.search(r"arxiv\.org/(?:abs|pdf)/(" + ARXIV_NEW + "|" + ARXIV_OLD + ")", s, re.I)
+    if m: return re.sub(r"\.pdf$", "", m.group(1), flags=re.I)
+    m = re.match(r"(?:arxiv:)?(" + ARXIV_NEW + "|" + ARXIV_OLD + ")$", s, re.I)
+    return m.group(1) if m else None
+
+def arxiv_meta(aid):
+    url = "http://export.arxiv.org/api/query?id_list=" + urllib.parse.quote(aid)
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "Mneme-ingest/1"})
+        with urllib.request.urlopen(req, timeout=30) as r:
+            x = ET.fromstring(r.read())
+    except Exception:
+        return {}
+    A = "{http://www.w3.org/2005/Atom}"
+    e = x.find(A + "entry")
+    if e is None: return {}
+    def t(tag):
+        n = e.find(A + tag); return re.sub(r"\s+", " ", (n.text or "").strip()) if n is not None else ""
+    authors = ", ".join((a.find(A + "name").text or "").strip()
+                        for a in e.findall(A + "author") if a.find(A + "name") is not None)
+    pub = t("published")[:10]
+    return {"title": t("title"), "authors": authors, "year": pub[:4],
+            "date": pub, "abstract": t("summary")}
+
+def tex_light_md(tex):
+    """Trim LaTeX preamble noise + map \\section{} -> markdown headers (so the reader gets an
+    outline). Math stays verbatim — the whole point of using the source over OCR."""
+    m = re.search(r"\\begin\{document\}(.*)\\end\{document\}", tex, re.S)
+    body = m.group(1) if m else tex
+    body = re.sub(r"\\subsubsection\*?\{([^}]*)\}", r"#### \1", body)
+    body = re.sub(r"\\subsection\*?\{([^}]*)\}", r"### \1", body)
+    body = re.sub(r"\\section\*?\{([^}]*)\}", r"## \1", body)
+    return body.strip()
+
+def _decode(b):
+    for enc in ("utf-8", "latin-1"):
+        try: return b.decode(enc)
+        except UnicodeDecodeError: pass
+    return b.decode("utf-8", "replace")
+
+def from_arxiv(aid):
+    meta = {"source": "arXiv:" + aid, "title": ""}
+    meta.update({k: v for k, v in arxiv_meta(aid).items() if v})
+    try:
+        data, _ = fetch("https://arxiv.org/e-print/" + aid)
+        texts = []
+        try:
+            with tarfile.open(fileobj=io.BytesIO(data), mode="r:*") as tar:
+                docs = [(m.name, _decode(tar.extractfile(m).read()))
+                        for m in tar.getmembers()
+                        if m.isfile() and m.name.lower().endswith(".tex")]
+                docs.sort(key=lambda nd: 0 if re.search(r"\\begin\{document\}", nd[1]) else 1)
+                texts = [f"% ==== {n} ====\n" + tex_light_md(c) for n, c in docs]
+        except tarfile.ReadError:
+            texts = [tex_light_md(gzip.decompress(data).decode("utf-8", "replace"))]  # single gz .tex
+        if not "".join(texts).strip():
+            raise RuntimeError("no .tex in e-print source")
+        head = [f"# {meta.get('title') or aid}", ""]
+        if meta.get("authors"): head.append(f"**Authors:** {meta['authors']}")
+        head.append(f"**arXiv:** {aid}  ({meta.get('date','')})")
+        if meta.get("abstract"): head += ["", "## Abstract", meta["abstract"]]
+        head += ["", "## Body (LaTeX source — equations intact)", ""]
+        return "\n".join(head) + "\n" + "\n\n".join(texts), meta
+    except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError,
+            RuntimeError, EOFError, OSError):
+        # source withdrawn / PDF-only submission -> fall back to the arXiv PDF
+        data2, _ = fetch("https://arxiv.org/pdf/" + aid)
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tf:
+            tf.write(data2); tmp = tf.name
+        try:
+            return from_pdf(tmp), meta
+        finally:
+            try: os.unlink(tmp)
+            except OSError: pass
+
+def dispatch(arg, is_text, raw_text, engine="auto", rich=False):
     if is_text:
         return raw_text, {"source": "text", "title": ""}
+    aid = arxiv_id(arg)
+    if aid and not Path(arg).exists():          # local file named like an id still wins
+        return from_arxiv(aid)
     if re.match(r"^https?://", arg):
-        return from_url(arg)
+        return from_url(arg, engine=engine, rich=rich)
     if re.match(r"^(doi:|10\.\d{4,}/)", arg, re.I) or "doi.org/" in arg:
         return from_doi(arg)
     p = Path(arg)
-    if not p.exists(): raise SystemExit(f"no such file / not a DOI or URL: {arg}")
+    if not p.exists(): raise SystemExit(f"no such file / not a DOI, arXiv id, or URL: {arg}")
     ext = p.suffix.lower()
-    if ext == ".pdf":  return from_pdf(p), {"source": p.name, "title": ""}
+    if ext == ".pdf":  return from_pdf(p, engine=engine, rich=rich), {"source": p.name, "title": ""}
     if ext == ".pptx": return from_pptx(p), {"source": p.name, "title": ""}
     if ext in (".txt", ".md"): return p.read_text(errors="replace"), {"source": p.name, "title": ""}
     fmtmap = {".odt":"odt",".rtf":"rtf",".epub":"epub",".html":"html",".htm":"html",".docx":"docx"}
@@ -136,17 +257,20 @@ def dispatch(arg, is_text, raw_text):
 def main():
     a = sys.argv[1:]
     out = None; title = None; slug = None; is_text = False; raw = None; arg = None
+    engine = "auto"; rich = False
     while a:
         x = a.pop(0)
         if x == "--out": out = a.pop(0)
         elif x == "--title": title = a.pop(0)
         elif x == "--slug": slug = a.pop(0)
+        elif x == "--rich": rich = True                       # force MinerU (tables/formulas/OCR)
+        elif x == "--pdf-engine": engine = a.pop(0)            # pdftotext | mineru | auto
         elif x == "--text": is_text = True; raw = (sys.stdin.read() if a and a[0]=="-" else (a.pop(0) if a else ""))
         else: arg = x
     if not is_text and not arg: raise SystemExit(__doc__)
 
     try:
-        text, meta = dispatch(arg, is_text, raw)
+        text, meta = dispatch(arg, is_text, raw, engine=engine, rich=rich)
     except urllib.error.HTTPError as e:
         raise SystemExit(f"fetch failed: HTTP {e.code} for {arg} (bad DOI/URL, or paywalled — "
                          f"try the PDF directly, or paste the text with --text)")
